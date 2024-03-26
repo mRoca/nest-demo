@@ -1,0 +1,71 @@
+image: node:20-alpine
+
+variables:
+  NPM_CONFIG_CACHE: "${CI_PROJECT_DIR}/.cache/npm"
+
+stages:
+  - test
+  - build
+
+commitlint:
+  image:
+    name: registry.hub.docker.com/commitlint/commitlint:18.6.2
+    entrypoint: [ "" ]
+  interruptible: true
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - npx commitlint --from "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+
+test@api:
+  interruptible: true
+  stage: test
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - api/**/*
+  services:
+    - name: mysql:8
+      variables:
+        MYSQL_DATABASE: main
+        MYSQL_USER: main
+        MYSQL_PASSWORD: main
+        MYSQL_ROOT_PASSWORD: root
+  variables:
+    DATABASE_HOST: mysql
+    DATABASE_USER: main
+    DATABASE_NAME: main
+    DATABASE_PASSWORD: main
+  before_script:
+    - cd api
+    - npm ci --prefer-offline
+  script:
+    - npm run lint
+    - npm run test:cov
+  after_script:
+    - |
+      cat << EOF >> api/.coverage/annotations.json
+      {"api:test":[
+       {"external_link": {"label": "Jest coverage report", "url": "https://${CI_PROJECT_ROOT_NAMESPACE}.${CI_PAGES_DOMAIN}/-/${CI_PROJECT_NAME}/-/jobs/${CI_JOB_ID}/artifacts/api/.coverage/index.html"}}
+      ]}
+      EOF
+      cat api/.coverage/annotations.json
+  coverage: /^\s*Lines\s*:\s*([\d\.]+)\%/
+  artifacts:
+    expose_as: API - tests
+    paths:
+      - api/.coverage/
+    reports:
+      junit: api/.coverage/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: api/.coverage/cobertura-coverage.xml
+      annotations: api/.coverage/annotations.json
+  cache:
+    - key: "api-npm"
+      paths:
+        - .cache/npm
+        - api/.eslintcache
+        - api/dist/*.tsbuildinfo

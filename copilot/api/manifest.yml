@@ -1,0 +1,35 @@
+# Read the full specification at: https://aws.github.io/copilot-cli/docs/manifest
+
+name: api
+type: Request-Driven Web Service
+
+network:
+  vpc:
+    placement: private
+
+http:
+  healthcheck: '/health'
+
+image:
+  build:
+    dockerfile: docker/server/Dockerfile
+    context: .
+  port: 8080
+
+cpu: 256
+memory: 512
+
+variables:
+  LOG_LEVEL: info
+  INJECTED_COPILOT_DATABASE_SECRET: DEMOCLUSTER_SECRET
+
+#See https://aws.github.io/copilot-cli/docs/developing/secrets/#bring-your-own-secrets
+#secrets:
+#  OPEN_WEATHER_MAP_API_TOKEN: OPEN_WEATHER_MAP_API_TOKEN_SECRET
+
+# You can use "Load Balanced Web Service" in order to create an ALB + ECS cluster instead of using App Runner
+#type: Load Balanced Web Service
+#count: 1
+#exec: true
+#http:
+#  path: '/'

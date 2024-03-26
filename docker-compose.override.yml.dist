@@ -1,0 +1,24 @@
+services:
+
+  traefik:
+    ports:
+      - '127.0.0.1:80:80'
+
+#  # Uncomment if you want to access the node debug port
+#  api:
+#    ports:
+#      # Node debug port
+#      - '127.0.0.1:9229:9229'
+#    environment:
+#      OPEN_WEATHER_MAP_API_TOKEN: ~
+
+#   # Uncomment if you want to access the mysql server from your host
+#  mysql:
+#    ports:
+#      - "127.0.0.1:3306:3306"
+
+#   # Uncomment if ... ?
+#  localstack:
+#    ports:
+#      - "127.0.0.1:4566:4566"
+

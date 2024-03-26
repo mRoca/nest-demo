@@ -1,0 +1,99 @@
+x-npm-cache-env: &npm-cache-env
+  NPM_CONFIG_CACHE: /srv/.cache/npm
+  NPM_CONFIG_UPDATE_NOTIFIER: false
+
+services:
+  traefik:
+    image: traefik:2.11
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    networks:
+      default:
+        aliases:
+          - traefik.localtest.me
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localtest.me`)"
+      - "traefik.http.services.dashboard.loadbalancer.server.port=8080"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.entrypoints=web"
+
+  api:
+    image: node:20-alpine
+    working_dir: /srv/api
+    user: ${COMPOSE_LOCAL_USER}
+    command: [ "npm", "run", "start:debug" ]
+    stop_signal: SIGKILL # nest watch does not propagate signals
+    env_file: [api/.env.docker]
+    environment:
+      DATABASE_HOST: mysql
+      <<: *npm-cache-env
+    volumes:
+      - ./api:/srv/api${COMPOSE_VOLUME_FLAG}
+      - ./.cache/npm:/srv/.cache/npm${COMPOSE_VOLUME_FLAG}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.localtest.me`)"
+      - "traefik.http.services.api.loadbalancer.server.port=3000"
+
+  # This service allows to locally test the built docker image
+  api_prod:
+    build:
+      context: .
+      dockerfile: docker/server/Dockerfile
+    profiles: ["manual"]
+    stop_grace_period: 30s
+    env_file:
+      - ./api/.env.docker
+    environment:
+      DATABASE_HOST: mysql
+    healthcheck:
+      test: ["NONE"] # Allows traefik to register the service when it starts, and not when it's healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api-prod.rule=Host(`api-prod.localtest.me`)"
+      - "traefik.http.services.api-prod.loadbalancer.server.port=3000"
+
+  mysql:
+    image: mysql:8
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --skip-log-bin
+    environment:
+      MYSQL_DATABASE: main
+      MYSQL_USER: main
+      MYSQL_PASSWORD: main
+      MYSQL_ROOT_PASSWORD: main
+      TZ: UTC
+    cap_add:
+      - SYS_NICE # See https://dev.mysql.com/doc/refman/8.0/en/resource-groups.html
+    volumes:
+      - mysql:/var/lib/mysql
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    environment:
+      - PMA_HOST=mysql
+      - PMA_USER=main
+      - PMA_PASSWORD=main
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.localtest.me`)"
+      - "traefik.http.services.phpmyadmin.loadbalancer.server.port=80"
+
+  tools:
+    build: docker/tools
+    profiles: ["cli"]
+    user: ${COMPOSE_LOCAL_USER}
+    working_dir: /srv
+    environment:
+      <<: *npm-cache-env
+    volumes:
+      - ./:/srv${COMPOSE_VOLUME_FLAG}
+      - ./.cache/npm:/srv/.cache/npm${COMPOSE_VOLUME_FLAG}
+
+  wait:
+    image: martin/wait
+    profiles: ["cli"]
+
+volumes:
+  mysql: ~

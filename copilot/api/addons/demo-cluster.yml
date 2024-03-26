@@ -1,0 +1,138 @@
+Parameters:
+  App:
+    Type: String
+    Description: Your application's name.
+  Env:
+    Type: String
+    Description: The environment name your service, job, or workflow is being deployed to.
+  Name:
+    Type: String
+    Description: Your workload's name.
+  ServiceSecurityGroupId:
+    Type: String
+    Description: The security group associated with the VPC connector.
+  # Customize your Aurora Serverless cluster by setting the default value of the following parameters.
+  democlusterDBName:
+    Type: String
+    Description: The name of the initial database to be created in the Aurora Serverless v2 cluster.
+    Default: demo
+    # Cannot have special characters
+    # Naming constraints: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Limits.html#RDS_Limits.Constraints
+Mappings:
+  democlusterEnvScalingConfigurationMap: 
+    All:
+      "DBMinCapacity": 0.5 # AllowedValues: from 0.5 through 128
+      "DBMaxCapacity": 8   # AllowedValues: from 0.5 through 128
+
+Resources:
+  democlusterDBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: Group of Copilot private subnets for Aurora Serverless v2 cluster.
+      SubnetIds:
+        !Split [',', { 'Fn::ImportValue': !Sub '${App}-${Env}-PrivateSubnets' }]
+  democlusterDBClusterSecurityGroup:
+    Metadata:
+      'aws:copilot:description': 'A security group for your Aurora Serverless v2 cluster democluster'
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: The Security Group for the Aurora Serverless v2 cluster.
+      SecurityGroupIngress:
+        - ToPort: 3306
+          FromPort: 3306
+          IpProtocol: tcp
+          Description: !Sub 'From the Aurora Security Group of the workload ${Name}.'
+          SourceSecurityGroupId: !Ref ServiceSecurityGroupId
+      VpcId:
+        Fn::ImportValue:
+          !Sub '${App}-${Env}-VpcId'
+      Tags:
+        - Key: Name
+          Value: !Sub 'copilot-${App}-${Env}-${Name}-Aurora'
+
+  democlusterAuroraSecret:
+    Metadata:
+      'aws:copilot:description': 'A Secrets Manager secret to store your DB credentials'
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: !Sub Aurora main user secret for ${AWS::StackName}
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: "password"
+        ExcludePunctuation: true
+        IncludeSpace: false
+        PasswordLength: 16
+
+  democlusterAuroraSecretAccessPolicy:
+    Metadata:
+      'aws:copilot:description': 'An IAM ManagedPolicy for your service to access the DB credentials secret'
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub
+        - Grants read access to the ${Secret} secret
+        - { Secret: !Ref democlusterAuroraSecret }
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: SecretActions
+            Effect: Allow
+            Action:
+              - 'secretsmanager:GetSecretValue'
+            Resource:
+              - !Ref democlusterAuroraSecret
+  democlusterDBClusterParameterGroup:
+    Metadata:
+      'aws:copilot:description': 'A DB parameter group for engine configuration values'
+    Type: 'AWS::RDS::DBClusterParameterGroup'
+    Properties:
+      Description: !Ref 'AWS::StackName'
+      Family: 'aurora-mysql8.0'
+      Parameters:
+        character_set_client: 'utf8'
+  democlusterDBCluster:
+    Metadata:
+      'aws:copilot:description': 'The democluster Aurora Serverless v2 database cluster'
+    Type: 'AWS::RDS::DBCluster'
+    Properties:
+      MasterUsername:
+        !Join [ "",  [ '{{resolve:secretsmanager:', !Ref democlusterAuroraSecret, ":SecretString:username}}" ]]
+      MasterUserPassword:
+        !Join [ "",  [ '{{resolve:secretsmanager:', !Ref democlusterAuroraSecret, ":SecretString:password}}" ]]
+      DatabaseName: !Ref democlusterDBName
+      Engine: 'aurora-mysql'
+      EngineVersion: '8.0.mysql_aurora.3.02.0'
+      DBClusterParameterGroupName: !Ref democlusterDBClusterParameterGroup
+      DBSubnetGroupName: !Ref democlusterDBSubnetGroup
+      Port: 3306
+      VpcSecurityGroupIds:
+        - !Ref democlusterDBClusterSecurityGroup
+      ServerlessV2ScalingConfiguration:
+        # Replace "All" below with "!Ref Env" to set different autoscaling limits per environment.
+        MinCapacity: !FindInMap [democlusterEnvScalingConfigurationMap, All, DBMinCapacity]
+        MaxCapacity: !FindInMap [democlusterEnvScalingConfigurationMap, All, DBMaxCapacity]
+  democlusterDBWriterInstance:
+    Metadata:
+      'aws:copilot:description': 'The democluster Aurora Serverless v2 writer instance'
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBClusterIdentifier: !Ref democlusterDBCluster
+      DBInstanceClass: db.serverless
+      Engine: 'aurora-mysql'
+      PromotionTier: 1
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region
+  democlusterSecretAuroraClusterAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref democlusterAuroraSecret
+      TargetId: !Ref democlusterDBCluster
+      TargetType: AWS::RDS::DBCluster
+Outputs:
+  democlusterAuroraSecretAccessPolicy: # Automatically augment your instance role with this managed policy.
+    Description: "Add the IAM ManagedPolicy to your instance role"
+    Value: !Ref democlusterAuroraSecretAccessPolicy
+  democlusterSecret: # Inject this secret ARN in your manifest file.
+    Description: "The secret ARN that holds the database username and password in JSON format. Fields are 'host', 'port', 'dbname', 'username', 'password', 'dbClusterIdentifier' and 'engine'"
+    Value: !Ref democlusterAuroraSecret

@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+set -e
+
+# If any command is provided, fallback to the default entrypoint
+if [ "$#" -ne 0 ]; then
+    exec "$@"
+fi
+
+# Let's load any available env file
+if [ -n "${NODE_ENV}" ] && [ -f ".env.${NODE_ENV}" ]; then
+  echo "Using env file: .env.${NODE_ENV}"
+  NODE_ARGS="--env-file=.env.${NODE_ENV}"
+fi
+
+echo "===== Running migrations with exclusive lock"
+node $NODE_ARGS runMigrations
+export DATABASE_RUN_MIGRATIONS=false
+
+echo "===== Starting node server"
+exec node $NODE_ARGS main

@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+
+# This script allows you to run any command into the tools container with your current user
+
+BASEDIR="$( cd "$( dirname "$0" )" && pwd )"
+DISABLE_TTY=${DISABLE_TTY:-0}
+DOCKER_HOST=${DOCKER_HOST:-/var/run/docker.sock}
+
+cd $(dirname ${BASEDIR})
+
+# If the first argument is a directory or its first letter, let's use it as workdir
+SERVICE=""
+OPTIONS=""
+case "$1" in
+    tools)
+        SERVICE="tools";;
+    api|a)
+        SERVICE="api";;
+    mysql)
+        SERVICE="mysql";;
+    *) ;;
+esac
+
+# Remove the first argument if it was a directory name
+if [ -n "$SERVICE" ]; then
+    shift;
+else
+  SERVICE="tools"
+fi
+
+# No argument left, let's assume we want to open a shell
+if [ $# -eq 0 ]; then
+    set -- "sh"
+fi
+
+EXEC_OR_RUN="run --rm --no-deps"
+if [ -n "$(docker compose ps -q --status running $SERVICE 2> /dev/null)" ]; then
+  EXEC_OR_RUN="exec"
+fi
+
+if echo ${DOCKER_HOST} | grep unix:///run/user/ > /dev/null 2>&1; then
+    # Docker rootless
+    docker compose $EXEC_OR_RUN $OPTIONS $SERVICE "$@"
+elif [ -t 1 ] && [ 1 -ne "${DISABLE_TTY}" ]; then
+    if [ "$( uname )" = "Darwin" ]; then
+      # Mac OSX: osxfx automatically set perms to the current user
+      docker compose $EXEC_OR_RUN $OPTIONS $SERVICE "$@"
+    else
+      # Default local env
+      docker compose $EXEC_OR_RUN $OPTIONS -u "$(id -u):$(id -g)" $SERVICE "$@"
+    fi
+else
+    # CI and other runners
+    docker compose $EXEC_OR_RUN $OPTIONS -u "$(id -u):$(id -g)" -T $SERVICE "$@"
+fi

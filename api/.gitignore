@@ -1,0 +1,11 @@
+/dist
+/node_modules
+.repl_history
+*.log
+/.coverage
+/.nyc_output
+.env
+.eslintcache
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
